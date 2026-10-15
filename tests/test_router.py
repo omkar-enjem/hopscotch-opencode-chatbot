@@ -55,6 +55,7 @@ def test_agent_handoff_flag(monkeypatch):
 
 def test_agent_plain_reply(monkeypatch):
     def fake_chat(messages, tools=None, **kwargs):
+        assert messages[-1] == {"role": "user", "content": "hello"}
         return _final("Hi! How can I help you today?")
 
     monkeypatch.setattr(router, "chat", fake_chat)

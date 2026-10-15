@@ -90,7 +90,7 @@ def run_agent(session_id: str, user_message: str) -> AgentResult:
     profile = state.profile
     system = _system_prompt(profile, _faq_context(user_message))
 
-    history = state.messages[-12:]  # keep the recent window
+    history = [*state.messages[-11:], {"role": "user", "content": user_message}]
     convo: list[dict[str, Any]] = [{"role": "system", "content": system}, *history]
 
     products: list[dict[str, Any]] = []

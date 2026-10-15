@@ -8,36 +8,47 @@ from __future__ import annotations
 import os
 import uuid
 
-import requests
 import streamlit as st
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
-BRAND_NAME = os.getenv("APP_NAME", "Kids Fashion Assistant")
-BOT_NAME = "Guddi"
+if st.secrets.load_if_toml_exists():
+    for key in (
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_BASE_URL",
+        "LLM_MODELS",
+        "APP_NAME",
+        "APP_URL",
+        "DATABASE_URL",
+        "BRAND_NAME",
+        "BOT_NAME",
+    ):
+        if key in st.secrets:
+            os.environ[key] = str(st.secrets[key])
+
+from app.config import get_settings
+from app.db import get_session, init_db
+from app.faq_search import refresh_index
+from app.models import Product
+from app.router import run_agent
+from seed_data import seed
+
+settings = get_settings()
+BRAND_NAME = settings.brand_name
+BOT_NAME = settings.bot_name
 
 st.set_page_config(page_title=f"{BOT_NAME} | {BRAND_NAME}", page_icon="\U0001F457", layout="centered")
 
 
-def api_get(path: str):
-    try:
-        r = requests.get(f"{BACKEND_URL}{path}", timeout=30)
-        r.raise_for_status()
-        return r.json()
-    except requests.RequestException:
-        return None
+@st.cache_resource
+def initialize_app() -> None:
+    init_db()
+    with get_session() as db:
+        needs_seed = db.query(Product.id).first() is None
+    if needs_seed:
+        seed()
+    refresh_index()
 
 
-def api_chat(session_id: str, message: str):
-    try:
-        r = requests.post(
-            f"{BACKEND_URL}/api/chat",
-            json={"session_id": session_id, "message": message},
-            timeout=180,
-        )
-        r.raise_for_status()
-        return r.json()
-    except requests.RequestException as exc:
-        return {"error": str(exc)}
+initialize_app()
 
 
 def render_products(products: list[dict]) -> None:
@@ -61,18 +72,13 @@ if "session_id" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-health = api_get("/api/health")
-
 with st.sidebar:
     st.header(f"\U0001F457 {BRAND_NAME}")
     st.caption(f"Assistant: **{BOT_NAME}**")
-    if health is None:
-        st.error("Backend not reachable.\nStart it with:\n`uvicorn app.main:app --reload`")
-    else:
-        st.success("Backend connected")
-        st.caption("Models: " + ", ".join(health.get("models", [])))
-        if not health.get("detail", {}).get("api_key_configured"):
-            st.warning("OPENROUTER_API_KEY missing - set it in .env")
+    st.success("Bot is ready")
+    st.caption("Models: " + ", ".join(settings.model_list))
+    if not settings.openrouter_api_key:
+        st.warning("OPENROUTER_API_KEY is missing. Add it to Streamlit secrets.")
     st.divider()
     if st.button("New chat", use_container_width=True):
         st.session_state.session_id = str(uuid.uuid4())
@@ -114,15 +120,18 @@ if prompt := st.chat_input("Ask about outfits, sizes, orders or returns..."):
 
     with st.chat_message("assistant", avatar="\U0001F467"):
         with st.spinner(f"{BOT_NAME} is checking..."):
-            data = api_chat(st.session_state.session_id, prompt)
-        if "error" in data:
-            st.error(f"Something went wrong: {data['error']}")
+            try:
+                result = run_agent(st.session_state.session_id, prompt)
+            except Exception as exc:
+                st.error(f"Something went wrong: {exc}")
+                result = None
+        if result is None:
             reply = "Sorry, I couldn't reach our service just now. Please try again."
             products, handoff = [], False
         else:
-            reply = data.get("reply", "")
-            products = data.get("products", [])
-            handoff = data.get("handoff", False)
+            reply = result.reply
+            products = result.products
+            handoff = result.handoff
         st.markdown(reply)
         render_products(products)
         if handoff:

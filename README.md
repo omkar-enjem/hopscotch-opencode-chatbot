@@ -27,18 +27,20 @@ Built with **Python + FastAPI + Streamlit + SQLite**, powered by any model throu
 ## Architecture at a glance
 
 ```
-Streamlit widget (ui/streamlit_app.py)
-        |  HTTP  (POST /api/chat)
-        v
-FastAPI backend (app/main.py)
-   - router.run_agent  -> prompt + tool-calling loop
-   - llm.chat          -> OpenRouter (fallback chain)
-   - tools.*           -> catalog / orders / size / FAQ / handoff
-   - faq_search        -> TF-IDF retrieval
-   - memory            -> conversation + child profile
+Streamlit app (ui/streamlit_app.py)
+  |  in-process call
+  v
+Bot services
+  - router.run_agent  -> prompt + tool-calling loop
+  - llm.chat          -> OpenRouter (fallback chain)
+  - tools.*           -> catalog / orders / size / FAQ / handoff
+  - faq_search        -> TF-IDF retrieval
+  - memory            -> conversation + child profile
         |
         v
 SQLite  (products, orders, faqs, size_chart, conversations, messages, child_profiles)
+
+React widget (widget/) -> FastAPI backend (app/main.py) -> same bot services
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
@@ -74,7 +76,7 @@ hopscotch-s4-poc/
 
 ---
 
-## Setup
+## Run locally
 
 ```powershell
 # 1. create + activate a venv
@@ -89,22 +91,35 @@ copy .env.example .env
 #   -> edit .env and set OPENROUTER_API_KEY=sk-or-...
 #   -> optionally change LLM_MODELS
 
-# 4. seed the mock database
-python seed_data.py
-
-# 5. run the backend (terminal 1)
-uvicorn app.main:app --reload --port 8000
-
-# 6. run the widget (terminal 2) - pick one
-streamlit run ui/streamlit_app.py            # Streamlit demo
-# or
-cd widget; npm install; npm run dev          # React widget (http://localhost:5173)
+# 4. run the Streamlit app; it initializes and seeds the mock database on first start
+streamlit run ui/streamlit_app.py
 ```
 
-Open the UI (Streamlit: http://localhost:8501, React: http://localhost:5173) and start chatting.
+Open http://localhost:8501 and start chatting. To run the optional React widget instead,
+start the FastAPI backend with `uvicorn app.main:app --reload --port 8000`, then run
+`cd widget; npm install; npm run dev` in another terminal.
 
-> No key yet? The POC still boots and `/api/health` works; chat calls will return
-> a clear "OPENROUTER_API_KEY is not configured" error.
+> The app still boots without a key, but chat requests need `OPENROUTER_API_KEY`.
+
+## Deploy from GitHub to Streamlit Community Cloud
+
+Create a Streamlit app using this repository and branch, set the app file to
+`ui/streamlit_app.py`, and keep `requirements.txt` at the repository root so Streamlit
+Cloud installs the project's dependencies.
+
+Add the following in the app's **Settings > Secrets**:
+
+```toml
+OPENROUTER_API_KEY = "your-new-openrouter-key"
+LLM_MODELS = "openai/gpt-4o-mini,anthropic/claude-3.5-haiku"
+BRAND_NAME = "Kids Fashion Assistant"
+BOT_NAME = "Guddi"
+```
+
+The Streamlit app runs the bot directly and seeds its demo database on first startup;
+it does not need a separate API service or a `BACKEND_URL`. Never commit `.env` or
+paste API keys into GitHub. Streamlit-hosted SQLite data may be reset when the app
+restarts, so this setup is intended for a demo.
 
 ---
 
