@@ -6,9 +6,15 @@ Run:  streamlit run ui/streamlit_app.py
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import sys
 import uuid
 
 import streamlit as st
+
+project_root = str(Path(__file__).resolve().parents[1])
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 if st.secrets.load_if_toml_exists():
     for key in (
